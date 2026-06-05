@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>RemoteTest</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -11,7 +12,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">RemoteTest</p>
-          <h1>Connection monitor</h1>
+          <h1>Anime theme roulette</h1>
         </div>
         <div class="status-pill" aria-live="polite">
           <span class="status-dot" data-status-dot></span>
@@ -19,48 +20,74 @@
         </div>
       </header>
 
-      <section class="workspace" aria-label="Connection monitor">
-        <div class="visual-panel">
-          <canvas id="signalCanvas" width="900" height="560" aria-label="Live signal map"></canvas>
-          <div class="readout-grid" aria-label="Connection statistics">
+      <section class="workspace" aria-label="AnimeThemes player">
+        <div class="player-panel">
+          <div class="video-frame">
+            <video data-player controls playsinline preload="metadata"></video>
+            <div class="empty-state" data-empty-state>
+              <p>Press Random Video</p>
+            </div>
+          </div>
+
+          <div class="now-playing">
             <div>
-              <span class="metric-label">Latency</span>
-              <strong data-latency>-- ms</strong>
+              <span class="metric-label">Anime</span>
+              <strong data-anime-title>Waiting for a pick</strong>
             </div>
             <div>
-              <span class="metric-label">Checks</span>
-              <strong data-checks>0</strong>
+              <span class="metric-label">Theme</span>
+              <strong data-theme-title>--</strong>
             </div>
             <div>
-              <span class="metric-label">Uptime</span>
-              <strong data-uptime>00:00</strong>
+              <span class="metric-label">Video</span>
+              <strong data-video-meta>--</strong>
             </div>
           </div>
         </div>
 
-        <aside class="control-panel" aria-label="Test controls">
+        <aside class="control-panel" aria-label="Video controls">
           <div class="panel-head">
-            <p class="section-label">Session</p>
-            <time data-clock>--:--:--</time>
+            <p class="section-label">AnimeThemes</p>
+            <span data-clock>--:--:--</span>
+          </div>
+
+          <div class="warning-panel" data-warning hidden>
+            <span>NSFW</span>
+            <p>This entry is marked NSFW by AnimeThemes. Playback is not blocked.</p>
           </div>
 
           <div class="primary-stat">
-            <span>Endpoint</span>
-            <strong data-endpoint>remote-01</strong>
+            <span>Current file</span>
+            <strong data-file-name>None loaded</strong>
           </div>
 
           <div class="button-row">
-            <button class="primary-button" type="button" data-run-test>
-              Run test
+            <button class="primary-button" type="button" data-random-video>
+              Random Video
             </button>
-            <button class="secondary-button" type="button" data-reset>
-              Reset
+            <button class="secondary-button" type="button" data-replay disabled>
+              Replay
             </button>
           </div>
 
-          <ol class="event-log" data-log aria-label="Event log">
-            <li>Ready for first check.</li>
-          </ol>
+          <dl class="detail-list" aria-label="Video details">
+            <div>
+              <dt>Source</dt>
+              <dd data-source>--</dd>
+            </div>
+            <div>
+              <dt>Resolution</dt>
+              <dd data-resolution>--</dd>
+            </div>
+            <div>
+              <dt>Size</dt>
+              <dd data-size>--</dd>
+            </div>
+            <div>
+              <dt>Flags</dt>
+              <dd data-flags>--</dd>
+            </div>
+          </dl>
         </aside>
       </section>
     </main>
