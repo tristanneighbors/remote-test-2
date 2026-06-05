@@ -23,7 +23,8 @@
       <section class="workspace" aria-label="AnimeThemes player">
         <div class="player-panel">
           <div class="video-frame">
-            <video data-player controls playsinline preload="metadata"></video>
+            <video class="is-active" data-player="active" controls playsinline preload="metadata"></video>
+            <video data-player="buffer" playsinline preload="auto" muted aria-hidden="true" tabindex="-1"></video>
             <div class="empty-state" data-empty-state>
               <p>Press Random Video</p>
             </div>

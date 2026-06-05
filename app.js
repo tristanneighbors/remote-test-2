@@ -3,7 +3,8 @@ const API_URL =
 
 const statusDot = document.querySelector("[data-status-dot]");
 const statusLabel = document.querySelector("[data-status-label]");
-const player = document.querySelector("[data-player]");
+let activePlayer = document.querySelector('[data-player="active"]');
+let bufferPlayer = document.querySelector('[data-player="buffer"]');
 const emptyState = document.querySelector("[data-empty-state]");
 const animeTitle = document.querySelector("[data-anime-title]");
 const themeTitle = document.querySelector("[data-theme-title]");
@@ -17,6 +18,9 @@ const sourceValue = document.querySelector("[data-source]");
 const resolutionValue = document.querySelector("[data-resolution]");
 const sizeValue = document.querySelector("[data-size]");
 const flagsValue = document.querySelector("[data-flags]");
+
+let queuedVideo = null;
+let queuePromise = null;
 
 function setStatus(state, label) {
   statusDot.className = "status-dot";
@@ -108,13 +112,124 @@ function updateWarning(entries) {
   warning.hidden = !entries.some((entry) => entry.nsfw);
 }
 
+function setActivePlayer(nextPlayer) {
+  if (nextPlayer === activePlayer) {
+    return;
+  }
+
+  activePlayer.pause();
+  activePlayer.removeAttribute("controls");
+  activePlayer.classList.remove("is-active");
+  activePlayer.setAttribute("aria-hidden", "true");
+  activePlayer.tabIndex = -1;
+
+  nextPlayer.controls = true;
+  nextPlayer.muted = false;
+  nextPlayer.classList.add("is-active");
+  nextPlayer.removeAttribute("aria-hidden");
+  nextPlayer.removeAttribute("tabindex");
+
+  [activePlayer, bufferPlayer] = [nextPlayer, activePlayer];
+}
+
+function resetBufferPlayer() {
+  bufferPlayer.pause();
+  bufferPlayer.removeAttribute("src");
+  bufferPlayer.load();
+  bufferPlayer.muted = true;
+  bufferPlayer.preload = "auto";
+  bufferPlayer.removeAttribute("controls");
+  bufferPlayer.classList.remove("is-active");
+  bufferPlayer.setAttribute("aria-hidden", "true");
+  bufferPlayer.tabIndex = -1;
+}
+
+async function fetchRandomVideo() {
+  const response = await fetch(`${API_URL}&_=${Date.now()}`);
+
+  if (!response.ok) {
+    throw new Error(`AnimeThemes returned ${response.status}`);
+  }
+
+  const data = await response.json();
+  const video = data.videos?.[0];
+
+  if (!video?.link) {
+    throw new Error("AnimeThemes did not return a playable video link.");
+  }
+
+  return video;
+}
+
+function warmVideo(video) {
+  resetBufferPlayer();
+  bufferPlayer.src = video.link;
+  bufferPlayer.load();
+  queuedVideo = video;
+}
+
+async function primeNextVideo() {
+  if (queuePromise) {
+    return queuePromise;
+  }
+
+  queuePromise = fetchRandomVideo()
+    .then((video) => {
+      warmVideo(video);
+      return video;
+    })
+    .catch(() => null)
+    .finally(() => {
+      queuePromise = null;
+    });
+
+  return queuePromise;
+}
+
+async function takeQueuedVideo() {
+  if (queuedVideo) {
+    const video = queuedVideo;
+    queuedVideo = null;
+    setActivePlayer(bufferPlayer);
+    return { video, warmed: true };
+  }
+
+  if (queuePromise) {
+    const video = await queuePromise;
+
+    if (video && queuedVideo === video) {
+      queuedVideo = null;
+      setActivePlayer(bufferPlayer);
+      return { video, warmed: true };
+    }
+  }
+
+  return { video: await fetchRandomVideo(), warmed: false };
+}
+
 async function playCurrentVideo() {
   try {
-    await player.play();
+    await activePlayer.play();
     setStatus("good", "Playing");
   } catch {
     setStatus("good", "Loaded");
   }
+}
+
+function showVideo(video) {
+  const entries = Array.isArray(video.animethemeentries) ? video.animethemeentries : [];
+  const entry = getPrimaryEntry(video);
+
+  emptyState.hidden = true;
+  animeTitle.textContent = getAnimeName(entry);
+  themeTitle.textContent = getThemeLabel(entry, video);
+  videoMeta.textContent = `${video.resolution || "--"}p ${video.source || ""}`.trim();
+  fileName.textContent = video.basename || video.filename || "Unknown file";
+  sourceValue.textContent = video.source || "--";
+  resolutionValue.textContent = video.resolution ? `${video.resolution}p` : "--";
+  sizeValue.textContent = formatBytes(video.size);
+  flagsValue.textContent = getFlags(video, entries);
+  updateWarning(entries);
 }
 
 async function loadRandomVideo() {
@@ -123,38 +238,18 @@ async function loadRandomVideo() {
   setStatus("ready", "Loading");
 
   try {
-    const response = await fetch(`${API_URL}&_=${Date.now()}`);
+    const { video, warmed } = await takeQueuedVideo();
 
-    if (!response.ok) {
-      throw new Error(`AnimeThemes returned ${response.status}`);
+    if (!warmed) {
+      activePlayer.src = video.link;
+      activePlayer.load();
     }
 
-    const data = await response.json();
-    const video = data.videos?.[0];
-
-    if (!video?.link) {
-      throw new Error("AnimeThemes did not return a playable video link.");
-    }
-
-    const entries = Array.isArray(video.animethemeentries) ? video.animethemeentries : [];
-    const entry = getPrimaryEntry(video);
-
-    player.src = video.link;
-    player.load();
-    emptyState.hidden = true;
-
-    animeTitle.textContent = getAnimeName(entry);
-    themeTitle.textContent = getThemeLabel(entry, video);
-    videoMeta.textContent = `${video.resolution || "--"}p ${video.source || ""}`.trim();
-    fileName.textContent = video.basename || video.filename || "Unknown file";
-    sourceValue.textContent = video.source || "--";
-    resolutionValue.textContent = video.resolution ? `${video.resolution}p` : "--";
-    sizeValue.textContent = formatBytes(video.size);
-    flagsValue.textContent = getFlags(video, entries);
-    updateWarning(entries);
+    showVideo(video);
 
     replayButton.disabled = false;
     await playCurrentVideo();
+    primeNextVideo();
   } catch (error) {
     setStatus("slow", "Error");
     animeTitle.textContent = "Unable to load a video";
@@ -167,23 +262,29 @@ async function loadRandomVideo() {
 }
 
 async function replayVideo() {
-  if (!player.currentSrc) {
+  if (!activePlayer.currentSrc) {
     return;
   }
 
-  player.currentTime = 0;
+  activePlayer.currentTime = 0;
   await playCurrentVideo();
+}
+
+function bindPlayerEvents(video) {
+  video.addEventListener("ended", () => setStatus("good", "Finished"));
+  video.addEventListener("play", () => setStatus("good", "Playing"));
+  video.addEventListener("pause", () => {
+    if (!video.ended && video.currentSrc && video === activePlayer) {
+      setStatus("good", "Paused");
+    }
+  });
 }
 
 randomButton.addEventListener("click", loadRandomVideo);
 replayButton.addEventListener("click", replayVideo);
-player.addEventListener("ended", () => setStatus("good", "Finished"));
-player.addEventListener("play", () => setStatus("good", "Playing"));
-player.addEventListener("pause", () => {
-  if (!player.ended && player.currentSrc) {
-    setStatus("good", "Paused");
-  }
-});
+bindPlayerEvents(activePlayer);
+bindPlayerEvents(bufferPlayer);
 
 updateClock();
 setInterval(updateClock, 1000);
+primeNextVideo();
