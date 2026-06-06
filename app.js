@@ -36,6 +36,7 @@ const malCache = new Map();
 
 let currentItem = null;
 let bufferedItemId = null;
+let jikanQueue = Promise.resolve();
 
 function setStatus(state, label) {
   statusDot.className = "status-dot";
@@ -78,6 +79,10 @@ function formatBytes(bytes) {
 
 function formatNumber(value) {
   return Number.isFinite(value) ? value.toLocaleString() : "--";
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function joinNames(items, fallback = "--") {
@@ -200,14 +205,40 @@ function warmQueueHead() {
   bufferedItemId = nextItem.id;
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
+async function fetchJson(url, { retries = 0, retryDelay = 800 } = {}) {
+  let lastError = null;
 
-  if (!response.ok) {
-    throw new Error(`Request failed with ${response.status}`);
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const response = await fetch(url);
+
+    if (response.ok) {
+      return response.json();
+    }
+
+    lastError = new Error(`Request failed with ${response.status}`);
+
+    if (attempt < retries && (response.status === 429 || response.status >= 500)) {
+      const retryAfter = Number(response.headers.get("Retry-After"));
+      const waitMs = Number.isFinite(retryAfter) ? retryAfter * 1000 : retryDelay * (attempt + 1);
+      await delay(waitMs);
+      continue;
+    }
+
+    throw lastError;
   }
 
-  return response.json();
+  throw lastError;
+}
+
+async function fetchJikanJson(url) {
+  const request = jikanQueue.then(async () => {
+    const data = await fetchJson(url, { retries: 2, retryDelay: 1200 });
+    await delay(450);
+    return data;
+  });
+
+  jikanQueue = request.catch(() => {});
+  return request;
 }
 
 async function fetchRandomVideo() {
@@ -257,12 +288,12 @@ function normalizeMalData(data) {
 }
 
 async function fetchMalById(malId) {
-  const data = await fetchJson(`${JIKAN_API}/anime/${malId}/full`);
+  const data = await fetchJikanJson(`${JIKAN_API}/anime/${malId}/full`);
   return normalizeMalData(data.data);
 }
 
 async function searchMalByName(name) {
-  const data = await fetchJson(`${JIKAN_API}/anime?q=${encodeURIComponent(name)}&limit=1`);
+  const data = await fetchJikanJson(`${JIKAN_API}/anime?q=${encodeURIComponent(name)}&limit=1`);
   return normalizeMalData(data.data?.[0]);
 }
 
@@ -276,19 +307,27 @@ async function fetchMalInfo(video) {
 
   let malInfo = null;
 
-  if (anime?.slug) {
-    const animeDetails = await fetchAnimeThemeAnime(anime.slug);
-    const malResource = animeDetails?.resources?.find(
-      (resource) => resource.site === "MyAnimeList" && Number.isFinite(resource.external_id),
-    );
+  try {
+    if (anime?.slug) {
+      const animeDetails = await fetchAnimeThemeAnime(anime.slug);
+      const malResource = animeDetails?.resources?.find(
+        (resource) => resource.site === "MyAnimeList" && Number.isFinite(Number(resource.external_id)),
+      );
 
-    if (malResource?.external_id) {
-      malInfo = await fetchMalById(malResource.external_id);
+      if (malResource?.external_id) {
+        malInfo = await fetchMalById(Number(malResource.external_id));
+      }
     }
+  } catch {
+    malInfo = null;
   }
 
   if (!malInfo && anime?.name) {
-    malInfo = await searchMalByName(anime.name);
+    try {
+      malInfo = await searchMalByName(anime.name);
+    } catch {
+      malInfo = null;
+    }
   }
 
   malCache.set(cacheKey, malInfo);
