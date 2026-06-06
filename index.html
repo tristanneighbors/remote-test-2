@@ -12,7 +12,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">RemoteTest</p>
-          <h1>Anime theme roulette</h1>
+          <h1>Anime theme queue</h1>
         </div>
         <div class="status-pill" aria-live="polite">
           <span class="status-dot" data-status-dot></span>
@@ -20,35 +20,35 @@
         </div>
       </header>
 
-      <section class="workspace" aria-label="AnimeThemes player">
+      <section class="workspace" aria-label="AnimeThemes queue player">
         <div class="player-panel">
-          <div class="video-frame">
+          <div class="video-frame" data-video-frame>
             <video class="is-active" data-player="active" controls playsinline preload="metadata"></video>
             <video data-player="buffer" playsinline preload="auto" muted aria-hidden="true" tabindex="-1"></video>
             <div class="empty-state" data-empty-state>
-              <p>Press Random Video</p>
+              <p>Add Random</p>
             </div>
           </div>
 
           <div class="now-playing">
             <div>
-              <span class="metric-label">Anime</span>
-              <strong data-anime-title>Waiting for a pick</strong>
+              <span class="metric-label">English</span>
+              <strong data-title-english>Not loaded</strong>
+            </div>
+            <div>
+              <span class="metric-label">Japanese</span>
+              <strong data-title-japanese>--</strong>
             </div>
             <div>
               <span class="metric-label">Theme</span>
               <strong data-theme-title>--</strong>
-            </div>
-            <div>
-              <span class="metric-label">Video</span>
-              <strong data-video-meta>--</strong>
             </div>
           </div>
         </div>
 
         <aside class="control-panel" aria-label="Video controls">
           <div class="panel-head">
-            <p class="section-label">AnimeThemes</p>
+            <p class="section-label">AnimeThemes + MAL</p>
             <span data-clock>--:--:--</span>
           </div>
 
@@ -57,32 +57,70 @@
             <p>This entry is marked NSFW by AnimeThemes. Playback is not blocked.</p>
           </div>
 
-          <div class="primary-stat">
-            <span>Current file</span>
-            <strong data-file-name>None loaded</strong>
+          <div class="button-row">
+            <button class="primary-button" type="button" data-add-random>
+              Add Random
+            </button>
+            <button class="secondary-button" type="button" data-skip disabled>
+              Skip
+            </button>
           </div>
 
-          <div class="button-row">
-            <button class="primary-button" type="button" data-random-video>
-              Random Video
-            </button>
+          <div class="button-row secondary-row">
             <button class="secondary-button" type="button" data-replay disabled>
               Replay
             </button>
+            <button class="secondary-button" type="button" data-fullscreen>
+              Fullscreen
+            </button>
+            <button class="secondary-button" type="button" data-clear-queue disabled>
+              Clear
+            </button>
           </div>
 
-          <dl class="detail-list" aria-label="Video details">
+          <label class="toggle-row">
+            <input type="checkbox" data-autoplay>
+            <span>Autoplay queue</span>
+          </label>
+
+          <section class="queue-section" aria-label="Queued videos">
+            <div class="queue-head">
+              <p class="section-label">Queue</p>
+              <span data-queue-count>0</span>
+            </div>
+            <ul class="queue-list" data-queue-list>
+              <li class="queue-empty">Queue is empty.</li>
+            </ul>
+          </section>
+
+          <dl class="detail-list" aria-label="MAL details">
             <div>
-              <dt>Source</dt>
-              <dd data-source>--</dd>
+              <dt>MAL title</dt>
+              <dd data-mal-title>--</dd>
             </div>
             <div>
-              <dt>Resolution</dt>
-              <dd data-resolution>--</dd>
+              <dt>Year</dt>
+              <dd data-year>--</dd>
             </div>
             <div>
-              <dt>Size</dt>
-              <dd data-size>--</dd>
+              <dt>Studio</dt>
+              <dd data-studio>--</dd>
+            </div>
+            <div>
+              <dt>Score</dt>
+              <dd data-score>--</dd>
+            </div>
+            <div>
+              <dt>Rank</dt>
+              <dd data-rank>--</dd>
+            </div>
+            <div>
+              <dt>Genres</dt>
+              <dd data-genres>--</dd>
+            </div>
+            <div>
+              <dt>Video</dt>
+              <dd data-video-meta>--</dd>
             </div>
             <div>
               <dt>Flags</dt>

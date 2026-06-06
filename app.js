@@ -1,26 +1,41 @@
-const API_URL =
+const RANDOM_VIDEO_URL =
   "https://api.animethemes.moe/video?sort=random&page%5Bsize%5D=1&include=animethemeentries.animetheme.anime";
+const ANIMETHEMES_API = "https://api.animethemes.moe";
+const JIKAN_API = "https://api.jikan.moe/v4";
 
 const statusDot = document.querySelector("[data-status-dot]");
 const statusLabel = document.querySelector("[data-status-label]");
+const videoFrame = document.querySelector("[data-video-frame]");
 let activePlayer = document.querySelector('[data-player="active"]');
 let bufferPlayer = document.querySelector('[data-player="buffer"]');
 const emptyState = document.querySelector("[data-empty-state]");
-const animeTitle = document.querySelector("[data-anime-title]");
+const titleEnglish = document.querySelector("[data-title-english]");
+const titleJapanese = document.querySelector("[data-title-japanese]");
 const themeTitle = document.querySelector("[data-theme-title]");
-const videoMeta = document.querySelector("[data-video-meta]");
 const clockValue = document.querySelector("[data-clock]");
 const warning = document.querySelector("[data-warning]");
-const fileName = document.querySelector("[data-file-name]");
-const randomButton = document.querySelector("[data-random-video]");
+const addRandomButton = document.querySelector("[data-add-random]");
+const skipButton = document.querySelector("[data-skip]");
 const replayButton = document.querySelector("[data-replay]");
-const sourceValue = document.querySelector("[data-source]");
-const resolutionValue = document.querySelector("[data-resolution]");
-const sizeValue = document.querySelector("[data-size]");
+const fullscreenButton = document.querySelector("[data-fullscreen]");
+const clearQueueButton = document.querySelector("[data-clear-queue]");
+const autoplayToggle = document.querySelector("[data-autoplay]");
+const queueList = document.querySelector("[data-queue-list]");
+const queueCount = document.querySelector("[data-queue-count]");
+const malTitle = document.querySelector("[data-mal-title]");
+const yearValue = document.querySelector("[data-year]");
+const studioValue = document.querySelector("[data-studio]");
+const scoreValue = document.querySelector("[data-score]");
+const rankValue = document.querySelector("[data-rank]");
+const genresValue = document.querySelector("[data-genres]");
+const videoMeta = document.querySelector("[data-video-meta]");
 const flagsValue = document.querySelector("[data-flags]");
 
-let queuedVideo = null;
-let queuePromise = null;
+const queue = [];
+const malCache = new Map();
+
+let currentItem = null;
+let bufferedItemId = null;
 
 function setStatus(state, label) {
   statusDot.className = "status-dot";
@@ -34,6 +49,14 @@ function setStatus(state, label) {
   }
 
   statusLabel.textContent = label;
+}
+
+function getItemId() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function formatBytes(bytes) {
@@ -53,15 +76,29 @@ function formatBytes(bytes) {
   return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function formatNumber(value) {
+  return Number.isFinite(value) ? value.toLocaleString() : "--";
+}
+
+function joinNames(items, fallback = "--") {
+  if (!Array.isArray(items) || items.length === 0) {
+    return fallback;
+  }
+
+  const names = items.map((item) => item.name).filter(Boolean);
+  return names.length > 0 ? names.join(", ") : fallback;
+}
+
 function getPrimaryEntry(video) {
   return Array.isArray(video.animethemeentries) ? video.animethemeentries[0] : null;
 }
 
-function getAnimeName(entry) {
-  return entry?.animetheme?.anime?.name || "Unknown anime";
+function getAnime(video) {
+  return getPrimaryEntry(video)?.animetheme?.anime || null;
 }
 
-function getThemeLabel(entry, video) {
+function getThemeLabel(video) {
+  const entry = getPrimaryEntry(video);
   const theme = entry?.animetheme;
   const type = theme?.type || "";
   const slug = theme?.slug || video.filename || video.basename;
@@ -142,16 +179,39 @@ function resetBufferPlayer() {
   bufferPlayer.classList.remove("is-active");
   bufferPlayer.setAttribute("aria-hidden", "true");
   bufferPlayer.tabIndex = -1;
+  bufferedItemId = null;
+}
+
+function warmQueueHead() {
+  const nextItem = queue[0];
+
+  if (!nextItem) {
+    resetBufferPlayer();
+    return;
+  }
+
+  if (bufferedItemId === nextItem.id && bufferPlayer.src === nextItem.video.link) {
+    return;
+  }
+
+  resetBufferPlayer();
+  bufferPlayer.src = nextItem.video.link;
+  bufferPlayer.load();
+  bufferedItemId = nextItem.id;
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Request failed with ${response.status}`);
+  }
+
+  return response.json();
 }
 
 async function fetchRandomVideo() {
-  const response = await fetch(`${API_URL}&_=${Date.now()}`);
-
-  if (!response.ok) {
-    throw new Error(`AnimeThemes returned ${response.status}`);
-  }
-
-  const data = await response.json();
+  const data = await fetchJson(`${RANDOM_VIDEO_URL}&_=${Date.now()}`);
   const video = data.videos?.[0];
 
   if (!video?.link) {
@@ -161,50 +221,194 @@ async function fetchRandomVideo() {
   return video;
 }
 
-function warmVideo(video) {
-  resetBufferPlayer();
-  bufferPlayer.src = video.link;
-  bufferPlayer.load();
-  queuedVideo = video;
+async function fetchAnimeThemeAnime(slug) {
+  const data = await fetchJson(`${ANIMETHEMES_API}/anime/${encodeURIComponent(slug)}?include=resources`);
+  return data.anime || null;
 }
 
-async function primeNextVideo() {
-  if (queuePromise) {
-    return queuePromise;
+function normalizeMalData(data) {
+  if (!data) {
+    return null;
   }
 
-  queuePromise = fetchRandomVideo()
-    .then((video) => {
-      warmVideo(video);
-      return video;
-    })
-    .catch(() => null)
-    .finally(() => {
-      queuePromise = null;
-    });
+  const airedYear = data.aired?.from ? new Date(data.aired.from).getFullYear() : null;
 
-  return queuePromise;
+  return {
+    id: data.mal_id || null,
+    url: data.url || "",
+    title: data.title || "Not listed",
+    english: data.title_english || "Not listed",
+    japanese: data.title_japanese || "Not listed",
+    year: data.year || airedYear || null,
+    score: Number.isFinite(data.score) ? data.score : null,
+    scoredBy: Number.isFinite(data.scored_by) ? data.scored_by : null,
+    rank: Number.isFinite(data.rank) ? data.rank : null,
+    popularity: Number.isFinite(data.popularity) ? data.popularity : null,
+    members: Number.isFinite(data.members) ? data.members : null,
+    studios: joinNames(data.studios),
+    genres: joinNames(data.genres),
+    status: data.status || "--",
+    rating: data.rating || "--",
+    type: data.type || "--",
+    source: data.source || "--",
+    episodes: Number.isFinite(data.episodes) ? data.episodes : null,
+    duration: data.duration || "--",
+  };
 }
 
-async function takeQueuedVideo() {
-  if (queuedVideo) {
-    const video = queuedVideo;
-    queuedVideo = null;
-    setActivePlayer(bufferPlayer);
-    return { video, warmed: true };
+async function fetchMalById(malId) {
+  const data = await fetchJson(`${JIKAN_API}/anime/${malId}/full`);
+  return normalizeMalData(data.data);
+}
+
+async function searchMalByName(name) {
+  const data = await fetchJson(`${JIKAN_API}/anime?q=${encodeURIComponent(name)}&limit=1`);
+  return normalizeMalData(data.data?.[0]);
+}
+
+async function fetchMalInfo(video) {
+  const anime = getAnime(video);
+  const cacheKey = anime?.slug || anime?.name || video.filename || video.basename;
+
+  if (malCache.has(cacheKey)) {
+    return malCache.get(cacheKey);
   }
 
-  if (queuePromise) {
-    const video = await queuePromise;
+  let malInfo = null;
 
-    if (video && queuedVideo === video) {
-      queuedVideo = null;
-      setActivePlayer(bufferPlayer);
-      return { video, warmed: true };
+  if (anime?.slug) {
+    const animeDetails = await fetchAnimeThemeAnime(anime.slug);
+    const malResource = animeDetails?.resources?.find(
+      (resource) => resource.site === "MyAnimeList" && Number.isFinite(resource.external_id),
+    );
+
+    if (malResource?.external_id) {
+      malInfo = await fetchMalById(malResource.external_id);
     }
   }
 
-  return { video: await fetchRandomVideo(), warmed: false };
+  if (!malInfo && anime?.name) {
+    malInfo = await searchMalByName(anime.name);
+  }
+
+  malCache.set(cacheKey, malInfo);
+  return malInfo;
+}
+
+function createQueueItem(video) {
+  const entries = Array.isArray(video.animethemeentries) ? video.animethemeentries : [];
+  const anime = getAnime(video);
+
+  return {
+    id: getItemId(),
+    video,
+    entries,
+    mal: {
+      title: anime?.name || "Not listed",
+      english: "Not listed",
+      japanese: "Not listed",
+    },
+    theme: getThemeLabel(video),
+  };
+}
+
+async function enrichItem(item) {
+  try {
+    const mal = await fetchMalInfo(item.video);
+
+    if (!mal) {
+      return;
+    }
+
+    item.mal = mal;
+    renderQueue();
+
+    if (currentItem?.id === item.id) {
+      showItem(item);
+    }
+  } catch {
+    // Keep the AnimeThemes video playable even when MAL-backed metadata is unavailable.
+  }
+}
+
+function getQueueTitle(item) {
+  return item.mal?.english && item.mal.english !== "Not listed"
+    ? item.mal.english
+    : item.mal?.title || getAnime(item.video)?.name || "Unknown anime";
+}
+
+function updateQueueButtons() {
+  skipButton.disabled = queue.length === 0;
+  clearQueueButton.disabled = queue.length === 0;
+  queueCount.textContent = String(queue.length);
+}
+
+function renderQueue() {
+  queueList.innerHTML = "";
+
+  if (queue.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "queue-empty";
+    empty.textContent = "Queue is empty.";
+    queueList.append(empty);
+    updateQueueButtons();
+    return;
+  }
+
+  queue.forEach((item, index) => {
+    const queueItem = document.createElement("li");
+    queueItem.className = "queue-item";
+
+    const text = document.createElement("div");
+    text.className = "queue-item-text";
+
+    const title = document.createElement("strong");
+    title.textContent = getQueueTitle(item);
+
+    const meta = document.createElement("span");
+    meta.textContent = `${index + 1}. ${item.theme}`;
+
+    const remove = document.createElement("button");
+    remove.className = "queue-remove";
+    remove.type = "button";
+    remove.dataset.removeId = item.id;
+    remove.textContent = "Remove";
+
+    text.append(title, meta);
+    queueItem.append(text, remove);
+    queueList.append(queueItem);
+  });
+
+  updateQueueButtons();
+}
+
+function showItem(item) {
+  const mal = item.mal;
+  const video = item.video;
+
+  emptyState.hidden = true;
+  titleEnglish.textContent = mal?.english || "Not listed";
+  titleJapanese.textContent = mal?.japanese || "Not listed";
+  themeTitle.textContent = item.theme;
+  malTitle.textContent = mal?.title || "--";
+  yearValue.textContent = mal?.year || "--";
+  studioValue.textContent = mal?.studios || "--";
+  scoreValue.textContent = Number.isFinite(mal?.score)
+    ? `${mal.score.toFixed(2)} (${formatNumber(mal.scoredBy)} votes)`
+    : "--";
+  rankValue.textContent = Number.isFinite(mal?.rank)
+    ? `#${formatNumber(mal.rank)} / popularity #${formatNumber(mal.popularity)}`
+    : "--";
+  genresValue.textContent = mal?.genres || "--";
+  videoMeta.textContent = [
+    video.resolution ? `${video.resolution}p` : null,
+    video.source,
+    formatBytes(video.size),
+  ]
+    .filter(Boolean)
+    .join(" / ");
+  flagsValue.textContent = getFlags(video, item.entries);
+  updateWarning(item.entries);
 }
 
 async function playCurrentVideo() {
@@ -216,48 +420,53 @@ async function playCurrentVideo() {
   }
 }
 
-function showVideo(video) {
-  const entries = Array.isArray(video.animethemeentries) ? video.animethemeentries : [];
-  const entry = getPrimaryEntry(video);
+async function playNextFromQueue() {
+  if (queue.length === 0) {
+    setStatus("ready", "Queue empty");
+    updateQueueButtons();
+    return;
+  }
 
-  emptyState.hidden = true;
-  animeTitle.textContent = getAnimeName(entry);
-  themeTitle.textContent = getThemeLabel(entry, video);
-  videoMeta.textContent = `${video.resolution || "--"}p ${video.source || ""}`.trim();
-  fileName.textContent = video.basename || video.filename || "Unknown file";
-  sourceValue.textContent = video.source || "--";
-  resolutionValue.textContent = video.resolution ? `${video.resolution}p` : "--";
-  sizeValue.textContent = formatBytes(video.size);
-  flagsValue.textContent = getFlags(video, entries);
-  updateWarning(entries);
+  const item = queue.shift();
+  renderQueue();
+
+  if (bufferedItemId === item.id && bufferPlayer.src === item.video.link) {
+    setActivePlayer(bufferPlayer);
+  } else {
+    activePlayer.src = item.video.link;
+    activePlayer.load();
+  }
+
+  currentItem = item;
+  showItem(item);
+  replayButton.disabled = false;
+  await playCurrentVideo();
+  warmQueueHead();
 }
 
-async function loadRandomVideo() {
-  randomButton.disabled = true;
-  replayButton.disabled = true;
-  setStatus("ready", "Loading");
+async function addRandomToQueue() {
+  addRandomButton.disabled = true;
+  setStatus("ready", "Fetching");
 
   try {
-    const { video, warmed } = await takeQueuedVideo();
+    const video = await fetchRandomVideo();
+    const item = createQueueItem(video);
+    queue.push(item);
+    renderQueue();
+    warmQueueHead();
 
-    if (!warmed) {
-      activePlayer.src = video.link;
-      activePlayer.load();
+    if (!currentItem && !activePlayer.currentSrc) {
+      await playNextFromQueue();
+    } else {
+      setStatus("good", "Queued");
     }
 
-    showVideo(video);
-
-    replayButton.disabled = false;
-    await playCurrentVideo();
-    primeNextVideo();
+    enrichItem(item);
   } catch (error) {
     setStatus("slow", "Error");
-    animeTitle.textContent = "Unable to load a video";
-    themeTitle.textContent = error.message;
-    videoMeta.textContent = "--";
-    warning.hidden = true;
+    malTitle.textContent = error.message;
   } finally {
-    randomButton.disabled = false;
+    addRandomButton.disabled = false;
   }
 }
 
@@ -270,9 +479,63 @@ async function replayVideo() {
   await playCurrentVideo();
 }
 
+function removeQueuedItem(id) {
+  const itemIndex = queue.findIndex((item) => item.id === id);
+
+  if (itemIndex < 0) {
+    return;
+  }
+
+  const [removed] = queue.splice(itemIndex, 1);
+  renderQueue();
+
+  if (removed.id === bufferedItemId) {
+    warmQueueHead();
+  }
+}
+
+function clearQueue() {
+  queue.length = 0;
+  renderQueue();
+  resetBufferPlayer();
+}
+
+async function toggleFullscreen() {
+  if (!document.fullscreenEnabled) {
+    setStatus("slow", "Fullscreen unavailable");
+    return;
+  }
+
+  if (document.fullscreenElement) {
+    await document.exitFullscreen();
+  } else {
+    await videoFrame.requestFullscreen();
+  }
+}
+
+function updateFullscreenButton() {
+  fullscreenButton.textContent = document.fullscreenElement ? "Exit Fullscreen" : "Fullscreen";
+}
+
+async function handleEnded(video) {
+  if (video !== activePlayer) {
+    return;
+  }
+
+  setStatus("good", "Finished");
+
+  if (autoplayToggle.checked && queue.length > 0) {
+    await playNextFromQueue();
+  }
+}
+
 function bindPlayerEvents(video) {
-  video.addEventListener("ended", () => setStatus("good", "Finished"));
-  video.addEventListener("play", () => setStatus("good", "Playing"));
+  video.addEventListener("ended", () => handleEnded(video));
+  video.addEventListener("play", () => {
+    if (video === activePlayer) {
+      setStatus("good", "Playing");
+    }
+  });
   video.addEventListener("pause", () => {
     if (!video.ended && video.currentSrc && video === activePlayer) {
       setStatus("good", "Paused");
@@ -280,11 +543,33 @@ function bindPlayerEvents(video) {
   });
 }
 
-randomButton.addEventListener("click", loadRandomVideo);
+function shouldIgnoreKey(event) {
+  const tagName = document.activeElement?.tagName;
+  return event.ctrlKey || event.metaKey || event.altKey || ["INPUT", "TEXTAREA", "SELECT"].includes(tagName);
+}
+
+addRandomButton.addEventListener("click", addRandomToQueue);
+skipButton.addEventListener("click", playNextFromQueue);
 replayButton.addEventListener("click", replayVideo);
+fullscreenButton.addEventListener("click", toggleFullscreen);
+clearQueueButton.addEventListener("click", clearQueue);
+queueList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-id]");
+
+  if (button) {
+    removeQueuedItem(button.dataset.removeId);
+  }
+});
+document.addEventListener("fullscreenchange", updateFullscreenButton);
+document.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() === "f" && !shouldIgnoreKey(event)) {
+    event.preventDefault();
+    toggleFullscreen();
+  }
+});
+
 bindPlayerEvents(activePlayer);
 bindPlayerEvents(bufferPlayer);
-
+renderQueue();
 updateClock();
 setInterval(updateClock, 1000);
-primeNextVideo();
